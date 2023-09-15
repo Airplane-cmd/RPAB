@@ -87,16 +87,23 @@ void loop()
       Serial.println(PWM);
       start_tp = millis();
     }
-    if(uint8_t(command[0]) == 45 && uint8_t(command[1]) == 231)
+    if(uint8_t(command[0]) == 45 && uint8_t(command[1]) == 231 && command.length() == 19)
     {
-      Serial.println("position data received");
-      // char bytes[4][4];
+      Serial.print("position data received");
+      //char bytes[4][4];
+      Serial.println(command);
       float data[4];
       for(uint8_t i = 0; i < 4; ++i)
       {
         char buff[4];
-        for(uint8_t j = 4 * i + 2; j < 4 * ((i + 1) + 2); ++j)  buff[j % 4] = command[j]; //command.size()
-        data[i] = (*(float*)buff);
+        Serial.println("retardness check:");//db
+        for(uint8_t j = 4 * i + 2; j < 4 * (i + 1) + 2; ++j)
+        {
+          buff[(j - 2) % 4] = command[j]; //command.size()
+          Serial.println((j - 2) % 4);//db
+        }
+        Serial.println("");//db
+        memcpy(&(data[i]), buff, 4);
       }
       
       yaw = data[0];
