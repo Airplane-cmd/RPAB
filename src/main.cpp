@@ -9,6 +9,14 @@
 #define FULL_CIRCLE_T 2
 #define ONE_METER_T 3.5
 
+static bool followStream_f = 0;
+ 
+static int16_t pwm_l;
+static int16_t pwm_r;
+
+static float cmd_vel_linear;
+static float cmd_vel_angular;
+
 static String command = "";
 static bool EOL = 0;
 
@@ -27,6 +35,7 @@ uint64_t start_tp;
 void serialEvent();
 void moveX(float duration, bool direction, uint8_t speed = 254);
 void rotateW(float duration, bool direction, uint8_t speed = 254);
+float getFloatFromString(String &command, uint8_t start);
 void setup() 
 {
   Serial.begin(9600);
@@ -45,12 +54,12 @@ void loop()
 {
   // digitalWrite(DIR_R, rotation_f & direction_f);//fix rotation
   // digitalWrite(DIR_L, !rotation_f & direction_f);
-  // digitalWrite(NOT_DIR_R, rotation_f & !direction_f);
-  // digitalWrite(NOT_DIR_L, !rotation_f & !direction_f);
-  digitalWrite(DIR_R, rotation_f & direction_f);//fix rotation
-  digitalWrite(DIR_L, !rotation_f & direction_f);
-  digitalWrite(NOT_DIR_R, !(rotation_f & direction_f));
-  digitalWrite(NOT_DIR_L, !(!rotation_f & direction_f));
+  // digitalWrite(NOT_DIR_R, !(rotation_f & direction_f));
+  // digitalWrite(NOT_DIR_L, !(!rotation_f & direction_f));
+  digitalWrite(DIR_R, direction_f);//fix rotation 
+  digitalWrite(DIR_L, rotation_f || !direction_f);
+  digitalWrite(NOT_DIR_R, !direction_f);
+  digitalWrite(NOT_DIR_L, !rotation_f || direction_f);//fancy shit
   analogWrite(SPEED_R, PWM);
   analogWrite(SPEED_L, PWM);
   if(millis() - start_tp >= duration * 1000)
@@ -99,7 +108,7 @@ void loop()
         Serial.println("retardness check:");//db
         for(uint8_t j = 4 * i + 2; j < 4 * (i + 1) + 2; ++j)
         {
-          buff[(j - 2) % 4] = command[j]; //command.size()
+          buff[(j - 2) % 4] = command[j]; //command.size() nice
           Serial.println((j - 2) % 4);//db
         }
         Serial.println("");//db
@@ -119,6 +128,19 @@ void loop()
       Serial.println(yaw);
 
     }
+    if(uint8_t(command[0]) == 45 && uint8_t(command[1]) == 232 && command.length() == 11)
+    {
+      cmd_vel_linear = getFloatFromString(command, 2);
+      cmd_vel_angular = getFloatFromString(command, 6);
+      Serial.print("Linear cmd_vel: ");
+      Serial.println(cmd_vel_linear);
+      Serial.print("Angular cmd_vel: ");
+      Serial.println(cmd_vel_angular);
+    }
+    if(uint8_t(command[0]) == 45 && uint8_t(command[1]) == 233 && command.length() == 4)
+    {
+      followStream_f = command[2] - 48;
+    }
     command = "";
     EOL = 0;
   
@@ -134,7 +156,19 @@ void serialEvent()
     command += symbol;
     if(symbol == '\n')  EOL = 1;
   }
-
+}
+float getFloatFromString(String &str, uint8_t start)
+{
+  char buff[4];
+  float data;
+  for(uint8_t i = start; i < start + 4; ++i)
+  {
+    buff[i - start] = command[i]; //command.size() nice
+    // Serial.println((j - 2) % 4);//db
+  }
+  // Serial.println("");//db
+  memcpy(&data, buff, 4);
+  return data;
 }
 void moveX(float duration, bool direction, uint8_t speed)
 {
