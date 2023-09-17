@@ -1,196 +1,133 @@
+#include "HardwareSerial.h"
 #include <Arduino.h>
+#include <cstdint>
 #include <string.h>
 #define DIR_R 30
-#define NOT_DIR_R 31
-#define DIR_L 4
-#define NOT_DIR_L 5
+#define DIR_R_INV 31
 #define SPEED_R 8
+
+#define DIR_L 4
+#define DIR_L_INV 5
 #define SPEED_L 9
-#define FULL_CIRCLE_T 2
-#define ONE_METER_T 3.5
 
-static bool followStream_f = 0;
- 
-static int16_t pwm_l;
-static int16_t pwm_r;
+#define YAW_COEFF_P 0.1
+#define YAW_COEFF_I 0.1
+#define YAW_COEFF_D 0.1
 
-static float cmd_vel_linear;
-static float cmd_vel_angular;
+#define SPEED_COEFF_P 0.1
+#define SPEED_COEFF_I 0.1
+#define SPEED_COEFF_D 0.1
 
-static String command = "";
-static bool EOL = 0;
+#define HEADER_SPEED 0xaa
+#define HEADER_SPEED_TARGET 0xab
 
-static float duration = 0;
-static bool direction_f = 0;
-static bool rotation_f = 0;
-static uint8_t PWM = 0;
+#define HEADER_YAW 0xba
+#define HEADER_YAW_TARGET 0xbb
 
-static float yaw;
-static float pos[3];
-static float yaw_goal;
-static float pos_goal[3];
+static String buffer = "";
 
-uint64_t start_tp;
+int16_t speed, speed_target, yaw, yaw_target;
+bool data_updated = 0;
 
-void serialEvent();
-void moveX(float duration, bool direction, uint8_t speed = 254);
-void rotateW(float duration, bool direction, uint8_t speed = 254);
-float getFloatFromString(String &command, uint8_t start);
-void setup() 
-{
-  Serial.begin(9600);
-//  Serial.println("wtf?");
+void write_right(int power) {
+  digitalWrite(DIR_R, power > 0);
+  digitalWrite(DIR_R_INV, power < 0);
+  analogWrite(SPEED_R, abs(power));
+}
+
+void write_left(int power) {
+  digitalWrite(DIR_L, power > 0);
+  digitalWrite(DIR_L_INV, power < 0);
+  analogWrite(SPEED_L, abs(power));
+}
+
+int16_t u_yaw, u_p_yaw, u_i_yaw, u_d_yaw, last_err_yaw, last_time_yaw;
+void evaluate_yaw() {
+  int16_t err = yaw_target - yaw;
+  u_p_yaw = YAW_COEFF_P * err;
+  u_i_yaw += YAW_COEFF_I * err;
+  u_d_yaw = YAW_COEFF_D *
+            ((err - last_err_yaw) / (millis() - last_time_yaw)); // kD(de/dt)
+
+  if (abs(err) < 256) // we don't need I component when error is small
+    u_i_yaw = YAW_COEFF_I * err;
+
+  last_err_yaw = err;
+  u_yaw = u_p_yaw + u_i_yaw + u_d_yaw;
+}
+
+int16_t u_speed, u_p_speed, u_i_speed, u_d_speed, last_err_speed,
+    last_time_speed;
+void evaluate_speed() {
+  int16_t err = speed_target - speed;
+  u_p_speed = SPEED_COEFF_P * err;
+  u_i_speed += SPEED_COEFF_I * err;
+  u_d_speed = SPEED_COEFF_D * ((err - last_err_speed) /
+                               (millis() - last_time_speed)); // kD(de/dt)
+
+  if (abs(err) < 256) // we don't need I component when error is small
+    u_i_speed = SPEED_COEFF_I * err;
+
+  last_err_speed = err;
+  u_speed = u_p_speed + u_i_speed + u_d_speed;
+}
+
+void setup() {
+  Serial.begin(2000000);
   pinMode(13, 0x1);
+
   pinMode(DIR_R, 0x1);
-  pinMode(DIR_L, 0x1);
-  pinMode(NOT_DIR_L, 0x1);
-  pinMode(NOT_DIR_R, 0x1);
+  pinMode(DIR_R_INV, 0x1);
   pinMode(SPEED_R, 0x1);
+
+  pinMode(DIR_L, 0x1);
+  pinMode(DIR_L_INV, 0x1);
   pinMode(SPEED_L, 0x1);
-  command.reserve(200);
 }
 
-void loop() 
-{
-  // digitalWrite(DIR_R, rotation_f & direction_f);//fix rotation
-  // digitalWrite(DIR_L, !rotation_f & direction_f);
-  // digitalWrite(NOT_DIR_R, !(rotation_f & direction_f));
-  // digitalWrite(NOT_DIR_L, !(!rotation_f & direction_f));
-  digitalWrite(DIR_R, direction_f);//fix rotation 
-  digitalWrite(DIR_L, rotation_f || !direction_f);
-  digitalWrite(NOT_DIR_R, !direction_f);
-  digitalWrite(NOT_DIR_L, !rotation_f || direction_f);//fancy shit
-  analogWrite(SPEED_R, PWM);
-  analogWrite(SPEED_L, PWM);
-  if(millis() - start_tp >= duration * 1000)
-  {
-    PWM = 0;
-  }
-  if(EOL)
-  {
-
-    // Serial.println("fine");
-    // Serial.println(uint8_t(command[2]));
-    // Serial.println(uint8_t(command[3]));
-    // Serial.println(uint8_t(command[4]));
-    // Serial.println(uint8_t(command[5]));
-    //   duration = 10.0;
-    //   rotation_f = 0;
-    //   direction_f = 1;
-    //   PWM = 50;
-    //   start_tp = millis();
-      
-    // }
-    if(uint8_t(command[0]) == 45 && uint8_t(command[1]) == 230)
-    {
-      Serial.println("move command received");
-      PWM = (uint8_t(command[2]) == 0) ? 0 : uint8_t(command[5]);
-      if(uint8_t(command[2]) == 1) rotation_f = 1;
-      else rotation_f = 0;
-      duration = float(command[3]);//to do: 4 bytes for duration
-      direction_f = bool(command[4]);
-      Serial.println(command);
-      Serial.println(duration);
-      Serial.println(direction_f);
-      Serial.println(rotation_f);
-      Serial.println(PWM);
-      start_tp = millis();
-    }
-    if(uint8_t(command[0]) == 45 && uint8_t(command[1]) == 231 && command.length() == 19)
-    {
-      Serial.print("position data received");
-      //char bytes[4][4];
-      Serial.println(command);
-      float data[4];
-      for(uint8_t i = 0; i < 4; ++i)
-      {
-        char buff[4];
-        Serial.println("retardness check:");//db
-        for(uint8_t j = 4 * i + 2; j < 4 * (i + 1) + 2; ++j)
-        {
-          buff[(j - 2) % 4] = command[j]; //command.size() nice
-          Serial.println((j - 2) % 4);//db
-        }
-        Serial.println("");//db
-        memcpy(&(data[i]), buff, 4);
+void loop() {
+  if (Serial.available()) {
+    data_updated = 1;
+    while (Serial.available()) {
+      switch (Serial.read()) {
+      case HEADER_SPEED:
+        while (Serial.available() < 4)
+          asm("nop");
+        Serial.readBytes((char *)&speed, 2);
+        Serial.readBytes((char *)&speed_target, 2);
+        evaluate_speed();
+      case HEADER_YAW:
+        while (Serial.available() < 4)
+          asm("nop");
+        Serial.readBytes((char *)&yaw, 2);
+        Serial.readBytes((char *)&yaw_target, 2);
+        evaluate_yaw();
       }
-      
-      yaw = data[0];
-      Serial.print("Pos: ");
-      for(uint8_t i = 0; i < 3; ++i)
-      {
-        pos[i] = data[i + 1];
-        Serial.print(" ");
-        Serial.print(pos[i]);
-      }
-      Serial.println("");
-      Serial.print("Yaw: ");
-      Serial.println(yaw);
+    }
+  }
+  write_left(u_speed + u_yaw); // CHANGE SIGNS IF BOAT DESTABILISES
+  write_right(u_speed - u_yaw);
+}
 
-    }
-    if(uint8_t(command[0]) == 45 && uint8_t(command[1]) == 232 && command.length() == 11)
-    {
-      cmd_vel_linear = getFloatFromString(command, 2);
-      cmd_vel_angular = getFloatFromString(command, 6);
-      Serial.print("Linear cmd_vel: ");
-      Serial.println(cmd_vel_linear);
-      Serial.print("Angular cmd_vel: ");
-      Serial.println(cmd_vel_angular);
-    }
-    if(uint8_t(command[0]) == 45 && uint8_t(command[1]) == 233 && command.length() == 4)
-    {
-      followStream_f = command[2] - 48;
-    }
-    command = "";
-    EOL = 0;
-  
-  }
-//  Serial.println("tick");
-//  delay(1000);
-}
-void serialEvent()
-{
-  while(Serial.available())
-  {
-    char symbol = char(Serial.read());
-    command += symbol;
-    if(symbol == '\n')  EOL = 1;
-  }
-}
-float getFloatFromString(String &str, uint8_t start)
-{
-  char buff[4];
-  float data;
-  for(uint8_t i = start; i < start + 4; ++i)
-  {
-    buff[i - start] = command[i]; //command.size() nice
-    // Serial.println((j - 2) % 4);//db
-  }
-  // Serial.println("");//db
-  memcpy(&data, buff, 4);
-  return data;
-}
-void moveX(float duration, bool direction, uint8_t speed)
-{
-  digitalWrite(DIR_R, direction);
-  digitalWrite(DIR_L, direction);
-  digitalWrite(NOT_DIR_R, !direction);
-  digitalWrite(NOT_DIR_L, !direction);
-  analogWrite(SPEED_R, speed);
-  analogWrite(SPEED_L, speed);
-  delay(duration * 1000);
-  digitalWrite(SPEED_R, 0);
-  digitalWrite(SPEED_L, 0);
-}
-void rotateW(float duration, bool direction, uint8_t speed)
-{
-  digitalWrite(NOT_DIR_R, !direction);
-  digitalWrite(DIR_R, direction);
-  digitalWrite(NOT_DIR_L, direction);
-  digitalWrite(DIR_L, !direction);
-  analogWrite(SPEED_R, speed);
-  analogWrite(SPEED_L, speed);
-  delay(duration * 1000);
-  digitalWrite(SPEED_R, 0);
-  digitalWrite(SPEED_L, 0);
-}
+// void moveX(float duration, bool direction, uint8_t speed) {
+//   digitalWrite(DIR_R, direction);
+//   digitalWrite(DIR_L, direction);
+//   digitalWrite(DIR_R_INV, !direction);
+//   digitalWrite(DIR_L_INV, !direction);
+//   analogWrite(SPEED_R, speed);
+//   analogWrite(SPEED_L, speed);
+//   delay(duration * 1000);
+//   digitalWrite(SPEED_R, 0);
+//   digitalWrite(SPEED_L, 0);
+// }
+// void rotateW(float duration, bool direction, uint8_t speed) {
+//   digitalWrite(DIR_R_INV, !direction);
+//   digitalWrite(DIR_R, direction);
+//   digitalWrite(DIR_L_INV, direction);
+//   digitalWrite(DIR_L, !direction);
+//   analogWrite(SPEED_R, speed);
+//   analogWrite(SPEED_L, speed);
+//   delay(duration * 1000);
+//   digitalWrite(SPEED_R, 0);
+//   digitalWrite(SPEED_L, 0);
+// }
