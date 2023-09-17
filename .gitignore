@@ -3,3 +3,5 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+compile_commands.json
+.cache/clangd/index/main.cpp.1440EEA32E70F456.idx

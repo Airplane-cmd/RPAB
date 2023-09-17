@@ -1,6 +1,5 @@
 #include "HardwareSerial.h"
 #include <Arduino.h>
-#include <cstdint>
 #include <string.h>
 #define DIR_R 30
 #define DIR_R_INV 31
@@ -19,7 +18,6 @@
 #define SPEED_COEFF_D 0.1
 
 #define HEADER_SPEED 0xaa
-#define HEADER_SPEED_TARGET 0xab
 
 #define HEADER_YAW 0xba
 #define HEADER_YAW_TARGET 0xbb
@@ -56,21 +54,21 @@ void evaluate_yaw() {
   u_yaw = u_p_yaw + u_i_yaw + u_d_yaw;
 }
 
-int16_t u_speed, u_p_speed, u_i_speed, u_d_speed, last_err_speed,
-    last_time_speed;
-void evaluate_speed() {
-  int16_t err = speed_target - speed;
-  u_p_speed = SPEED_COEFF_P * err;
-  u_i_speed += SPEED_COEFF_I * err;
-  u_d_speed = SPEED_COEFF_D * ((err - last_err_speed) /
-                               (millis() - last_time_speed)); // kD(de/dt)
+// int16_t u_speed, u_p_speed, u_i_speed, u_d_speed, last_err_speed,
+//     last_time_speed;
+// void evaluate_speed() {
+//   int16_t err = speed_target - speed;
+//   u_p_speed = SPEED_COEFF_P * err;
+//   u_i_speed += SPEED_COEFF_I * err;
+//   u_d_speed = SPEED_COEFF_D * ((err - last_err_speed) /
+//                                (millis() - last_time_speed)); // kD(de/dt)
 
-  if (abs(err) < 256) // we don't need I component when error is small
-    u_i_speed = SPEED_COEFF_I * err;
+//   if (abs(err) < 256) // we don't need I component when error is small
+//     u_i_speed = SPEED_COEFF_I * err;
 
-  last_err_speed = err;
-  u_speed = u_p_speed + u_i_speed + u_d_speed;
-}
+//   last_err_speed = err;
+//   u_speed = u_p_speed + u_i_speed + u_d_speed;
+// }
 
 void setup() {
   Serial.begin(2000000);
@@ -91,11 +89,7 @@ void loop() {
     while (Serial.available()) {
       switch (Serial.read()) {
       case HEADER_SPEED:
-        while (Serial.available() < 4)
-          asm("nop");
         Serial.readBytes((char *)&speed, 2);
-        Serial.readBytes((char *)&speed_target, 2);
-        evaluate_speed();
       case HEADER_YAW:
         while (Serial.available() < 4)
           asm("nop");
@@ -105,8 +99,9 @@ void loop() {
       }
     }
   }
-  write_left(u_speed + u_yaw); // CHANGE SIGNS IF BOAT DESTABILISES
-  write_right(u_speed - u_yaw);
+  // CHANGE SIGNS IF BOAT DESTABILISES
+  write_left(map(speed + u_yaw, -32768, 32767, -255, 255));
+  write_right(map(speed + u_yaw, -32768, 32767, -255, 255));
 }
 
 // void moveX(float duration, bool direction, uint8_t speed) {
