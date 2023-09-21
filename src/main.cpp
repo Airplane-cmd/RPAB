@@ -29,8 +29,8 @@ static float pos[3];
 static float yaw_goal;
 static float pos_goal[3];
 
-static uint8_t minAutoPWM = 30;
-static uint8_t maxAutoPWM = 50;
+static uint8_t minAutoPWM = 40;
+static uint8_t maxAutoPWM = 60;
 
 uint64_t start_tp;
 uint64_t cmd_vel_tp;
@@ -236,13 +236,14 @@ void cmd_velSpin(float angular_vel, float linear_vel)
 
     if(angular_vel > 0.1f)
     { 
-      if(!direction_f) pwm_r = 0;//hope, it works
-      else            pwm_l = 0;
+      if(!direction_f) pwm_l = 0;
+      else            pwm_r = 0;
     }
     if(angular_vel < -0.1f)
     {
-      if(!direction_f) pwm_l = 0;
-      else            pwm_r = 0;
+      
+      if(!direction_f) pwm_r = 0;//hope, it works
+      else            pwm_l = 0;
     } 
   }
   if(abs(linear_vel) <= 0.01f && abs(angular_vel) > 0.1f)
@@ -250,13 +251,13 @@ void cmd_velSpin(float angular_vel, float linear_vel)
     direction_f = 0;
     if(angular_vel > 0.1f)
     { 
-      pwm_r = minAutoPWM;//hope, it works
+      pwm_r = 50;//minAutoPWM;//hope, it works
       pwm_l = 0; 
     }
     if(angular_vel < -0.1f)
     {
       pwm_r = 0;//hope, it works
-      pwm_l = minAutoPWM;
+      pwm_l = 50;//minAutoPWM;
     }    
   }
   Serial.print("Left, right pwm: ");
